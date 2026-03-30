@@ -34,7 +34,7 @@ FORMATO DE RESPUESTA — solo JSON, sin texto extra, sin backticks:
 
 REGLAS:
 - Describí exactamente lo que VES, no lo que suponés
-- Máximo 4 hallazgos, máximo 15 palabras cada uno  
+- Máximo 4 hallazgos, máximo 15 palabras cada uno
 - Nunca diagnósticos definitivos, solo hallazgos descriptivos
 - Si la calidad es mala, indicalo como hallazgo`
 
@@ -50,8 +50,9 @@ REGLAS:
       generationConfig: { temperature: 0.1, maxOutputTokens: 400 },
     }
 
+    // ✅ CORREGIDO: gemini-2.0-flash en lugar de gemini-1.5-flash
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
