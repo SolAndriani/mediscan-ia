@@ -1,234 +1,385 @@
 'use client'
+import { useState, useRef } from 'react'
 import Link from 'next/link'
-import { useState } from 'react'
 
-export default function Home() {
-  const [menuOpen, setMenuOpen] = useState(false)
+type StudyStatus = 'done' | 'analyzing' | 'pending' | 'review'
+
+interface Study {
+  id: number
+  name: string
+  age: number | string
+  type: string
+  status: StudyStatus
+  date: string
+  conf: string
+  findings?: string[]
+}
+
+const initialStudies: Study[] = [
+  { id:1, name:'García, M.L.', age:52, type:'RX Tórax', status:'done', date:'Hoy 10:23', conf:'94%', findings:['Opacidad lóbulo superior derecho — 2.3 cm','Silueta cardíaca normal','Trama vascular conservada'] },
+  { id:2, name:'López, R.', age:38, type:'TAC Abdomen', status:'analyzing', date:'Hoy 11:05', conf:'—', findings:[] },
+  { id:3, name:'Fernández, C.', age:65, type:'Ecografía', status:'pending', date:'Hoy 11:30', conf:'—', findings:[] },
+  { id:4, name:'Torres, A.', age:44, type:'Mamografía', status:'review', date:'Ayer 16:40', conf:'71%', findings:['Microcalcificaciones región central','Nódulo 8mm cuadrante superoexterno'] },
+  { id:5, name:'Romero, P.', age:29, type:'RX Columna', status:'done', date:'Ayer 15:10', conf:'97%', findings:['Sin alteraciones estructurales','Espacios intervertebrales conservados'] },
+]
+
+const statusMap = {
+  done: { label:'Listo', color:'var(--green)', bg:'var(--green-dim)' },
+  analyzing: { label:'Analizando...', color:'var(--teal-light)', bg:'var(--teal-dim)' },
+  pending: { label:'En espera', color:'var(--amber)', bg:'var(--amber-dim)' },
+  review: { label:'Revisar', color:'var(--red)', bg:'var(--red-dim)' },
+}
+
+export default function Dashboard() {
+  const [studies, setStudies] = useState<Study[]>(initialStudies)
+  const [selected, setSelected] = useState(0)
+  const [modal, setModal] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [uploadStep, setUploadStep] = useState(-1)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [aiResult, setAiResult] = useState<string[]>([])
+  const [notification, setNotification] = useState<{icon:string,text:string}|null>(null)
+  const [form, setForm] = useState({ name:'', age:'', type:'RX Tórax', notes:'' })
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const showNotif = (icon: string, text: string) => {
+    setNotification({ icon, text })
+    setTimeout(() => setNotification(null), 3500)
+  }
+
+  const simulateUpload = async (filename: string, imageBase64?: string) => {
+    setUploading(true)
+    setAiResult([])
+    const steps = ['Cargando imagen segura...','Preprocesando...','Analizando con IA...','Asignando especialista...']
+    for (let i = 0; i < steps.length; i++) {
+      setUploadStep(i)
+      await new Promise(r => setTimeout(r, 1200))
+    }
+    setUploadStep(-1)
+    setUploading(false)
+
+    if (imageBase64) {
+      setAnalyzing(true)
+      try {
+        const res = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: imageBase64, studyType: form.type })
+        })
+        const data = await res.json()
+        if (data.findings) setAiResult(data.findings)
+      } catch {
+        setAiResult(['No se pudo conectar con la IA. Verificá tu conexión.'])
+      }
+      setAnalyzing(false)
+    }
+
+    const newStudy: Study = {
+      id: Date.now(),
+      name: form.name || 'Nuevo paciente',
+      age: form.age || '—',
+      type: form.type || 'RX Tórax',
+      status: 'analyzing',
+      date: 'Ahora',
+      conf: '—',
+      findings: []
+    }
+    setStudies(prev => [newStudy, ...prev])
+    setSelected(0)
+    showNotif('✅', 'Imagen enviada. Análisis en curso...')
+
+    setTimeout(() => {
+      setStudies(prev => prev.map((s,i) => i === 0 ? { ...s, status:'done', conf:'92%' } : s))
+      showNotif('🩺', 'Dr. Ramírez validó el informe')
+    }, 5000)
+  }
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const base64 = (ev.target?.result as string).split(',')[1]
+      simulateUpload(file.name, base64)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    const file = e.dataTransfer.files?.[0]
+    if (file) {
+      const reader = new FileReader()
+      reader.onload = (ev) => {
+        const base64 = (ev.target?.result as string).split(',')[1]
+        simulateUpload(file.name, base64)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
+  const createStudy = () => {
+    const s: Study = { id:Date.now(), name:form.name||'Nuevo paciente', age:form.age||'—', type:form.type, status:'pending', date:'Ahora', conf:'—', findings:[] }
+    setStudies(prev => [s, ...prev])
+    setModal(false)
+    setForm({ name:'', age:'', type:'RX Tórax', notes:'' })
+    showNotif('✅', `Estudio de ${s.name} creado`)
+  }
+
+  const current = studies[selected]
+
+  const S = {
+    sidebar: { width:220, flexShrink:0, background:'var(--bg2)', borderRight:'1px solid var(--border)', display:'flex', flexDirection:'column' as const, padding:'1.5rem 1rem', gap:'.25rem' },
+    navItem: (active:boolean) => ({ display:'flex', alignItems:'center', gap:'.7rem', padding:'.65rem .75rem', borderRadius:8, color: active?'var(--teal-light)':'var(--text2)', fontSize:'.85rem', cursor:'pointer', background: active?'var(--teal-dim)':'transparent', border:`1px solid ${active?'var(--border2)':'transparent'}`, transition:'all .15s' }),
+    card: { background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, overflow:'hidden' as const },
+    cardHeader: { padding:'1rem 1.25rem .75rem', display:'flex', alignItems:'center', justifyContent:'space-between', borderBottom:'1px solid var(--border)' },
+    cardTitle: { fontSize:'.8rem', fontWeight:500, color:'var(--text2)', textTransform:'uppercase' as const, letterSpacing:'.07em' },
+    btn: (variant:'teal'|'ghost') => ({ display:'inline-flex', alignItems:'center', gap:'.4rem', padding:'.5rem 1rem', borderRadius:6, fontSize:'.82rem', fontWeight:500, fontFamily:'inherit', cursor:'pointer', border: variant==='ghost'?'1px solid var(--border)':'none', background: variant==='teal'?'var(--teal)':'transparent', color: variant==='teal'?'#fff':'var(--text2)', transition:'all .15s' }),
+    tag: (color:'gray'|'teal'|'amber') => {
+      const map = { gray:{bg:'rgba(255,255,255,.04)',color:'var(--text2)',border:'1px solid var(--border)'}, teal:{bg:'var(--teal-dim)',color:'var(--teal-light)',border:'1px solid var(--border2)'}, amber:{bg:'var(--amber-dim)',color:'var(--amber)',border:'none'} }
+      return { fontSize:'.68rem', padding:'.2rem .6rem', borderRadius:100, fontWeight:500, textTransform:'uppercase' as const, letterSpacing:'.05em', ...map[color] }
+    },
+  }
+
+  const uploadSteps = ['Cargando imagen segura...','Preprocesando...','Analizando con IA...','Asignando especialista...']
 
   return (
-    <div style={{ background: '#F7F4EE', minHeight: '100vh', fontFamily: "'DM Sans', sans-serif", color: '#1a1a1a' }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,600;1,9..144,300&family=DM+Sans:wght@300;400;500&display=swap');
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        .fraunces { font-family: 'Fraunces', serif; }
-        @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.8)} }
-        @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
-        @keyframes fillBar { from{width:0} to{width:94%} }
-        @keyframes markerPulse { 0%,100%{box-shadow:0 0 0 0 rgba(239,159,39,.4)} 50%{box-shadow:0 0 0 8px rgba(239,159,39,0)} }
-        .pulse-dot::before { content:''; display:inline-block; width:7px; height:7px; background:#1D9E75; border-radius:50%; animation:pulse 2s infinite; margin-right:8px; }
-        .float-badge { animation: float 3s ease-in-out infinite; }
-        .confidence-fill { animation: fillBar 2s ease 0.5s both; }
-        .marker { animation: markerPulse 2s infinite; }
-        .btn-primary { background:#0F6E56; color:#fff; padding:.85rem 2rem; border-radius:100px; font-size:.95rem; font-weight:500; text-decoration:none; border:none; cursor:pointer; transition:background .2s; display:inline-block; }
-        .btn-primary:hover { background:#085041; }
-        .btn-ghost-dark { color:#1a1a1a; font-size:.95rem; text-decoration:none; display:inline-flex; align-items:center; gap:.4rem; transition:gap .2s; }
-        .btn-ghost-dark:hover { gap:.7rem; }
-        nav { position:fixed; top:0; left:0; right:0; z-index:100; padding:1rem 4%; display:flex; align-items:center; justify-content:space-between; background:rgba(247,244,238,.9); backdrop-filter:blur(12px); border-bottom:1px solid rgba(15,110,86,.12); }
-        .nav-links a { text-decoration:none; color:#555; font-size:.9rem; margin-left:2rem; transition:color .2s; }
-        .nav-links a:hover { color:#0F6E56; }
-        .nav-cta { background:#0F6E56; color:#fff !important; padding:.45rem 1.2rem; border-radius:100px; font-weight:500 !important; }
-        .feature-card { background:#fff; border-radius:16px; padding:2rem; border:1px solid #EDE9DF; transition:transform .2s, box-shadow .2s; }
-        .feature-card:hover { transform:translateY(-3px); box-shadow:0 12px 40px rgba(0,0,0,.07); }
-        .pricing-card { background:#fff; border-radius:20px; padding:2rem; border:1px solid #EDE9DF; display:flex; flex-direction:column; }
-        .pricing-card.featured { background:#0F6E56; border-color:#0F6E56; transform:scale(1.03); }
-        .plan-btn { display:block; text-align:center; padding:.85rem; border-radius:100px; font-size:.9rem; font-weight:500; text-decoration:none; cursor:pointer; border:1.5px solid #0F6E56; color:#0F6E56; background:transparent; transition:all .2s; }
-        .plan-btn:hover { background:#0F6E56; color:#fff; }
-        .plan-btn.featured-btn { background:#fff; color:#0F6E56; border-color:#fff; }
-        .testimonial-card { background:#fff; border-radius:16px; padding:1.8rem; border:1px solid #EDE9DF; }
-        @media(max-width:768px){
-          .hero-grid{grid-template-columns:1fr!important}
-          .steps-grid{grid-template-columns:1fr!important}
-          .features-grid{grid-template-columns:1fr!important}
-          .pricing-grid{grid-template-columns:1fr!important}
-          .pricing-card.featured{transform:scale(1)!important}
-          .testimonials-grid{grid-template-columns:1fr!important}
-          .nav-links{display:none}
-          .hero-visual{display:none}
-        }
-      `}</style>
+    <div style={{ display:'flex', height:'100vh', overflow:'hidden', fontFamily:"'DM Sans',sans-serif" }}>
 
-      {/* NAV */}
-      <nav>
-        <div className="fraunces" style={{ fontSize:'1.4rem', fontWeight:600, color:'#0F6E56', letterSpacing:'-.02em' }}>
-          Medi<span style={{ color:'#1a1a1a' }}>Scan</span> IA
+      <aside style={S.sidebar}>
+        <Link href="/" style={{ fontFamily:"'Fraunces',serif", fontSize:'1.2rem', fontWeight:500, color:'var(--teal-light)', textDecoration:'none', letterSpacing:'-.02em', marginBottom:'2rem', display:'block' }}>
+          Medi<span style={{ color:'var(--text)' }}>Scan</span> IA
+        </Link>
+        {[['🏠','Dashboard'],['📁','Mis estudios'],['📋','Informes'],['👥','Especialistas'],['📊','Analítica'],['⚙️','Configuración']].map(([icon,label],i)=>(
+          <div key={label} style={S.navItem(i===0)}><span>{icon}</span>{label}</div>
+        ))}
+        <div style={{ marginTop:'auto', paddingTop:'1rem', borderTop:'1px solid var(--border)' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'.7rem', padding:'.6rem .75rem' }}>
+            <div style={{ width:30, height:30, borderRadius:'50%', background:'var(--teal-dim)', border:'1px solid var(--border2)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'.7rem', fontWeight:500, color:'var(--teal-light)', flexShrink:0 }}>CP</div>
+            <div>
+              <div style={{ fontSize:'.82rem', color:'var(--text2)' }}>Clínica Previsor</div>
+              <div style={{ fontSize:'.7rem', color:'var(--text3)' }}>Plan Clínica · 87/200</div>
+            </div>
+          </div>
         </div>
-        <div className="nav-links">
-          <a href="#como-funciona">Cómo funciona</a>
-          <a href="#precios">Precios</a>
-          <Link href="/dashboard" className="nav-cta" style={{ marginLeft:'2rem', textDecoration:'none', color:'#fff' }}>Solicitar demo</Link>
-        </div>
-      </nav>
+      </aside>
 
-      {/* HERO */}
-      <div style={{ paddingTop:'5rem', background:'#F7F4EE' }}>
-        <div className="hero-grid" style={{ maxWidth:1200, margin:'0 auto', padding:'6rem 4% 5rem', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4rem', alignItems:'center' }}>
-          <div>
-            <div className="pulse-dot" style={{ display:'inline-flex', alignItems:'center', background:'#E1F5EE', color:'#0F6E56', fontSize:'.8rem', fontWeight:500, padding:'.35rem .9rem', borderRadius:'100px', border:'1px solid #5DCAA5', marginBottom:'1.5rem', letterSpacing:'.04em', textTransform:'uppercase' }}>
-              IA médica para LATAM
-            </div>
-            <h1 className="fraunces" style={{ fontSize:'clamp(2.8rem,5vw,4rem)', fontWeight:600, lineHeight:1.1, letterSpacing:'-.03em', marginBottom:'1.5rem' }}>
-              Segunda opinión diagnóstica{' '}
-              <em style={{ fontStyle:'italic', color:'#0F6E56' }}>en minutos,</em>{' '}
-              no en días
-            </h1>
-            <p style={{ fontSize:'1.1rem', color:'#555', lineHeight:1.7, maxWidth:520, marginBottom:'2.5rem' }}>
-              Subís la imagen médica, nuestra IA la analiza y una red de especialistas la valida.
-              Para clínicas independientes de Latinoamérica.
-            </p>
-            <div style={{ display:'flex', gap:'1rem', alignItems:'center', flexWrap:'wrap' }}>
-              <Link href="/dashboard" className="btn-primary">Probar demo gratuita →</Link>
-              <a href="#como-funciona" className="btn-ghost-dark">Ver cómo funciona →</a>
-            </div>
-            <div style={{ display:'flex', gap:'2.5rem', marginTop:'3rem', paddingTop:'2rem', borderTop:'1px solid #EDE9DF' }}>
-              {[['94%','Precisión diagnóstica'],['< 8 min','Tiempo de respuesta'],['DICOM','Compatible nativamente']].map(([n,l])=>(
-                <div key={l}>
-                  <div className="fraunces" style={{ fontSize:'2rem', fontWeight:600, color:'#0F6E56', lineHeight:1 }}>{n}</div>
-                  <div style={{ fontSize:'.8rem', color:'#555', marginTop:'.3rem' }}>{l}</div>
+      <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+
+        <div style={{ height:56, flexShrink:0, borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', padding:'0 1.5rem', gap:'1rem' }}>
+          <div style={{ fontFamily:"'Fraunces',serif", fontSize:'1rem', fontWeight:500, color:'var(--text)', flex:1 }}>Dashboard</div>
+          <button style={S.btn('ghost')} onClick={() => setModal(true)}>+ Nuevo paciente</button>
+          <button style={S.btn('teal')} onClick={() => fileRef.current?.click()}>⬆ Subir imagen</button>
+          <input ref={fileRef} type="file" accept=".dcm,.jpg,.jpeg,.png" style={{ display:'none' }} onChange={handleFile}/>
+        </div>
+
+        <div style={{ flex:1, overflowY:'auto', padding:'1.5rem', display:'flex', gap:'1.5rem' }}>
+
+          <div style={{ flex:1, display:'flex', flexDirection:'column', gap:'1.25rem', minWidth:0 }}>
+
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'1rem' }}>
+              {[['Estudios este mes','87','var(--teal-light)','↑ 12% vs mes anterior'],['En análisis','3','var(--amber)','Promedio: 6 min'],['Informes listos','81','var(--text)','93% completitud'],['Precisión IA','96%','var(--teal-light)','Validado']].map(([l,n,c,d])=>(
+                <div key={l} style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:10, padding:'1rem 1.25rem' }}>
+                  <div style={{ fontSize:'.72rem', color:'var(--text3)', textTransform:'uppercase', letterSpacing:'.07em', marginBottom:'.5rem' }}>{l}</div>
+                  <div style={{ fontFamily:"'Fraunces',serif", fontSize:'1.8rem', fontWeight:500, color:c, lineHeight:1, marginBottom:'.3rem' }}>{n}</div>
+                  <div style={{ fontSize:'.72rem', color:'var(--text3)' }}>{d}</div>
                 </div>
               ))}
             </div>
-          </div>
 
-          {/* SCAN MOCKUP */}
-          <div className="hero-visual" style={{ position:'relative' }}>
-            <div style={{ background:'#04232E', borderRadius:20, overflow:'hidden' }}>
-              <div style={{ padding:'1.2rem 1.5rem', display:'flex', alignItems:'center', gap:'0.5rem', borderBottom:'1px solid rgba(255,255,255,.08)' }}>
-                {['#FF5F56','#FFBD2E','#27C93F'].map(c=><div key={c} style={{ width:10, height:10, borderRadius:'50%', background:c }}/>)}
-                <span style={{ marginLeft:'auto', fontSize:'.75rem', color:'rgba(255,255,255,.4)', fontFamily:'monospace' }}>RX_torax_001.dcm</span>
+            <div style={S.card}>
+              <div style={S.cardHeader}>
+                <div style={S.cardTitle}>Subir imagen</div>
+                <span style={S.tag('teal')}>DICOM · JPG · PNG</span>
               </div>
-              <div style={{ padding:'1.5rem', position:'relative' }}>
-                <div style={{ background:'#060f14', borderRadius:10, aspectRatio:'4/3', display:'flex', alignItems:'center', justifyContent:'center', position:'relative', overflow:'hidden' }}>
-                  <svg viewBox="0 0 400 300" style={{ width:'100%', height:'100%', opacity:.85 }}>
-                    <rect width="400" height="300" fill="#0d1b22"/>
-                    <g stroke="rgba(180,220,200,0.25)" strokeWidth="1.5" fill="none">
-                      <ellipse cx="200" cy="150" rx="130" ry="120"/>
-                      <path d="M 100 80 Q 80 130 85 160 Q 90 190 100 200"/>
-                      <path d="M 300 80 Q 320 130 315 160 Q 310 190 300 200"/>
-                      <path d="M 95 100 Q 75 110 70 130"/><path d="M 305 100 Q 325 110 330 130"/>
-                      <path d="M 88 120 Q 65 132 60 155"/><path d="M 312 120 Q 335 132 340 155"/>
-                      <path d="M 86 140 Q 62 154 60 178"/><path d="M 314 140 Q 338 154 340 178"/>
-                    </g>
-                    <rect x="193" y="40" width="14" height="230" rx="4" fill="rgba(200,220,210,0.15)"/>
-                    <ellipse cx="155" cy="160" rx="65" ry="85" fill="rgba(100,180,150,0.07)"/>
-                    <ellipse cx="245" cy="160" rx="65" ry="85" fill="rgba(100,180,150,0.07)"/>
-                    <ellipse cx="185" cy="170" rx="35" ry="42" fill="rgba(150,170,160,0.15)"/>
-                    <ellipse cx="255" cy="130" rx="22" ry="18" fill="rgba(255,190,50,0.08)" stroke="rgba(255,190,50,0.45)" strokeWidth="1.5" strokeDasharray="4 3"/>
-                  </svg>
-                  <div style={{ position:'absolute', top:'1rem', right:'1rem', background:'rgba(29,158,117,.15)', border:'1px solid rgba(29,158,117,.4)', borderRadius:10, padding:'.6rem .9rem' }}>
-                    <div style={{ fontSize:'.7rem', color:'#5DCAA5', textTransform:'uppercase', letterSpacing:'.08em', marginBottom:'.2rem' }}>Análisis IA</div>
-                    <div style={{ fontSize:'.85rem', color:'#fff', fontWeight:500 }}>Posible opacidad LSD</div>
-                    <div style={{ marginTop:'.4rem', height:3, background:'rgba(255,255,255,.1)', borderRadius:10, overflow:'hidden' }}>
-                      <div className="confidence-fill" style={{ height:'100%', background:'#5DCAA5', borderRadius:10, width:'94%' }}/>
+              {!uploading ? (
+                <div style={{ padding:'1rem 1.25rem' }}>
+                  <div onDragOver={e=>e.preventDefault()} onDrop={handleDrop} onClick={() => fileRef.current?.click()}
+                    style={{ border:'1.5px dashed var(--border2)', borderRadius:10, padding:'2rem', textAlign:'center', cursor:'pointer', background:'rgba(29,158,117,.05)', transition:'all .2s' }}>
+                    <div style={{ fontSize:'2rem', marginBottom:'.75rem', opacity:.6 }}>🩻</div>
+                    <div style={{ fontSize:'.9rem', fontWeight:500, color:'var(--text)', marginBottom:'.3rem' }}>Arrastrá la imagen aquí o hacé clic</div>
+                    <div style={{ fontSize:'.78rem', color:'var(--text3)' }}>DICOM nativo, JPEG y PNG hasta 50 MB</div>
+                    <div style={{ display:'flex', gap:'.5rem', justifyContent:'center', marginTop:'1rem', flexWrap:'wrap' }}>
+                      {['RX Tórax','TAC','Ecografía','Mamografía','RMN'].map(t=>(
+                        <span key={t} style={S.tag('gray')}>{t}</span>
+                      ))}
                     </div>
                   </div>
                 </div>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'.75rem', marginTop:'1rem' }}>
-                  {[['Silueta cardíaca','Normal','#5DCAA5'],['Zona marcada','Revisar','#FFBD2E'],['Confianza','94%','#5DCAA5'],['Especialista','Asignado','#5DCAA5']].map(([l,v,c])=>(
-                    <div key={l} style={{ background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.08)', borderRadius:8, padding:'.6rem .8rem' }}>
-                      <div style={{ fontSize:'.65rem', color:'rgba(255,255,255,.3)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'.2rem' }}>{l}</div>
-                      <div style={{ fontSize:'.8rem', color:c, fontWeight:500 }}>{v}</div>
+              ) : (
+                <div style={{ padding:'1.25rem', display:'flex', flexDirection:'column', gap:'.75rem' }}>
+                  {uploadSteps.map((step, i) => {
+                    const done = i < uploadStep
+                    const active = i === uploadStep
+                    return (
+                      <div key={i} style={{ display:'flex', alignItems:'center', gap:'.75rem', fontSize:'.82rem' }}>
+                        <div style={{ width:24, height:24, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'.7rem', flexShrink:0, background: done?'var(--green-dim)': active?'var(--teal-dim)':'var(--bg4)', color: done?'var(--green)': active?'var(--teal-light)':'var(--text3)', opacity: active?1:done?0.8:0.4 }}>
+                          {done ? '✓' : i+1}
+                        </div>
+                        <div style={{ color: active?'var(--text)':'var(--text3)', textDecoration: done?'line-through':'none' }}>{step}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div style={{ ...S.card, flex:1 }}>
+              <div style={S.cardHeader}>
+                <div style={S.cardTitle}>Estudios recientes</div>
+                <button style={{ ...S.btn('ghost'), fontSize:'.75rem', padding:'.3rem .7rem' }}>Ver todos</button>
+              </div>
+              <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                <thead>
+                  <tr>
+                    {['Paciente','Tipo','Estado','Fecha','Confianza'].map(h=>(
+                      <th key={h} style={{ textAlign:'left', fontSize:'.68rem', color:'var(--text3)', fontWeight:500, textTransform:'uppercase', letterSpacing:'.07em', padding:'.6rem 1.25rem', borderBottom:'1px solid var(--border)' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {studies.map((s,i) => {
+                    const st = statusMap[s.status]
+                    return (
+                      <tr key={s.id} onClick={() => setSelected(i)}
+                        style={{ borderBottom:'1px solid var(--border)', cursor:'pointer', background: i===selected?'var(--teal-dim)':'transparent', transition:'background .12s' }}>
+                        <td style={{ padding:'.75rem 1.25rem', fontSize:'.82rem' }}>
+                          <div style={{ fontWeight:500, color:'var(--text)' }}>{s.name}</div>
+                          <div style={{ fontSize:'.7rem', color:'var(--text3)', marginTop:'.1rem' }}>{s.age} años</div>
+                        </td>
+                        <td style={{ padding:'.75rem 1.25rem' }}><span style={S.tag('gray')}>{s.type}</span></td>
+                        <td style={{ padding:'.75rem 1.25rem' }}>
+                          <span style={{ display:'inline-flex', alignItems:'center', gap:'.4rem', fontSize:'.75rem', padding:'.25rem .65rem', borderRadius:100, background:st.bg, color:st.color }}>
+                            <span style={{ width:5, height:5, borderRadius:'50%', background:st.color, display:'inline-block' }}/>
+                            {st.label}
+                          </span>
+                        </td>
+                        <td style={{ padding:'.75rem 1.25rem', fontSize:'.75rem', color:'var(--text3)' }}>{s.date}</td>
+                        <td style={{ padding:'.75rem 1.25rem', fontSize:'.82rem', fontWeight:500, color: s.conf!=='—'?'var(--teal-light)':'var(--text3)' }}>{s.conf}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style={{ width:320, flexShrink:0, display:'flex', flexDirection:'column', gap:'1.25rem' }}>
+
+            <div style={S.card}>
+              <div style={S.cardHeader}>
+                <div style={S.cardTitle}>Visor</div>
+                <span style={S.tag('amber')}>{current?.type}</span>
+              </div>
+              <div style={{ position:'relative', background:'#060f14', margin:'1rem 1.25rem', borderRadius:8, aspectRatio:'4/3', overflow:'hidden' }}>
+                <svg viewBox="0 0 320 240" style={{ width:'100%', height:'100%' }}>
+                  <rect width="320" height="240" fill="#060f14"/>
+                  <g stroke="rgba(160,210,185,0.2)" strokeWidth="1.2" fill="none">
+                    <ellipse cx="160" cy="120" rx="105" ry="95"/>
+                    <path d="M 75 65 Q 58 105 62 130 Q 66 155 75 162"/>
+                    <path d="M 245 65 Q 262 105 258 130 Q 254 155 245 162"/>
+                    <path d="M 70 82 Q 50 92 46 108"/><path d="M 250 82 Q 270 92 274 108"/>
+                    <path d="M 64 100 Q 42 112 40 130"/><path d="M 256 100 Q 278 112 280 130"/>
+                  </g>
+                  <rect x="153" y="28" width="11" height="185" rx="3" fill="rgba(180,210,195,0.12)"/>
+                  <ellipse cx="122" cy="128" rx="52" ry="68" fill="rgba(80,150,120,0.06)"/>
+                  <ellipse cx="198" cy="128" rx="52" ry="68" fill="rgba(80,150,120,0.06)"/>
+                  <ellipse cx="148" cy="136" rx="28" ry="34" fill="rgba(130,155,145,0.12)"/>
+                  <ellipse cx="206" cy="98" rx="18" ry="14" fill="rgba(239,159,39,0.06)" stroke="rgba(239,159,39,0.35)" strokeWidth="1.2" strokeDasharray="3 2"/>
+                </svg>
+                <div style={{ position:'absolute', width:36, height:36, top:'30%', left:'58%', transform:'translate(-50%,-50%)', border:'1.5px solid var(--amber)', borderRadius:'50%' }}/>
+              </div>
+
+              <div style={{ padding:'.75rem 1.25rem', borderTop:'1px solid var(--border)' }}>
+                {[['Confianza diagnóstica','94%'],['Cobertura de imagen','98%']].map(([l,v])=>(
+                  <div key={l}>
+                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'.5rem' }}>
+                      <span style={{ fontSize:'.75rem', color:'var(--text2)' }}>{l}</span>
+                      <span style={{ fontSize:'.75rem', fontWeight:500, color:'var(--teal-light)' }}>{v}</span>
                     </div>
-                  ))}
+                    <div style={{ height:4, background:'var(--bg4)', borderRadius:10, overflow:'hidden', marginBottom:'.75rem' }}>
+                      <div style={{ height:'100%', width:v, background:'var(--teal)', borderRadius:10 }}/>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ padding:'0 1.25rem 1rem', display:'flex', flexDirection:'column', gap:'.5rem' }}>
+                {analyzing && (
+                  <div style={{ fontSize:'.8rem', color:'var(--teal-light)', padding:'.5rem', display:'flex', alignItems:'center', gap:'.5rem' }}>
+                    ⟳ Gemini analizando imagen...
+                  </div>
+                )}
+                {(aiResult.length > 0 ? aiResult : current?.findings || []).map((f,i)=>(
+                  <div key={i} style={{ display:'flex', alignItems:'flex-start', gap:'.6rem', padding:'.65rem .75rem', background:'var(--bg3)', borderRadius:8, border:'1px solid var(--border)' }}>
+                    <div style={{ width:7, height:7, borderRadius:'50%', background: i===0?'var(--amber)':'var(--green)', flexShrink:0, marginTop:4 }}/>
+                    <div style={{ fontSize:'.8rem', color:'var(--text2)', lineHeight:1.5 }}>{f}</div>
+                  </div>
+                ))}
+                {(!analyzing && aiResult.length===0 && (current?.findings||[]).length===0) && (
+                  <div style={{ fontSize:'.8rem', color:'var(--text3)', padding:'.5rem' }}>Subí una imagen para ver el análisis</div>
+                )}
+              </div>
+            </div>
+
+            <div style={S.card}>
+              <div style={S.cardHeader}>
+                <div style={S.cardTitle}>Informe</div>
+                <button style={{ ...S.btn('ghost'), fontSize:'.72rem', padding:'.3rem .65rem' }} onClick={() => showNotif('⬇','Informe descargado')}>⬇ PDF</button>
+              </div>
+              <div style={{ margin:'0 1.25rem 1rem', display:'flex', alignItems:'center', gap:'.7rem', padding:'.7rem .9rem', background:'var(--teal-dim)', border:'1px solid var(--border2)', borderRadius:8 }}>
+                <div style={{ width:32, height:32, borderRadius:'50%', background:'var(--teal)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'.68rem', fontWeight:500, color:'#fff', flexShrink:0 }}>JR</div>
+                <div>
+                  <div style={{ fontSize:'.82rem', fontWeight:500, color:'var(--teal-light)' }}>Dr. Jorge Ramírez</div>
+                  <div style={{ fontSize:'.7rem', color:'var(--text3)' }}>Radiólogo · MN 12.450 · Validando...</div>
                 </div>
               </div>
-            </div>
-            <div className="float-badge" style={{ position:'absolute', bottom:'-1.5rem', left:'-1.5rem', background:'#fff', borderRadius:14, padding:'1rem 1.2rem', boxShadow:'0 20px 60px rgba(0,0,0,.12)', display:'flex', alignItems:'center', gap:'.8rem' }}>
-              <div style={{ width:36, height:36, background:'#E1F5EE', borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'1.1rem' }}>🩺</div>
-              <div>
-                <div style={{ fontSize:'.85rem', fontWeight:500 }}>Dr. Ramírez validó el informe</div>
-                <div style={{ fontSize:'.7rem', color:'#555' }}>Hace 3 minutos · Rosario, Argentina</div>
+              <div style={{ padding:'0 1.25rem 1rem', fontSize:'.8rem', color:'var(--text2)', lineHeight:1.8 }}>
+                <div style={{ fontSize:'.68rem', textTransform:'uppercase', letterSpacing:'.08em', color:'var(--text3)', marginBottom:'.4rem' }}>Técnica</div>
+                <p>Radiografía en proyección estándar. Buena técnica radiológica.</p>
+                <div style={{ fontSize:'.68rem', textTransform:'uppercase', letterSpacing:'.08em', color:'var(--text3)', margin:'.8rem 0 .4rem' }}>Hallazgos IA</div>
+                <p>{aiResult.length > 0 ? aiResult.slice(0,-1).join('. ') : (current?.findings||[]).slice(0,-1).join('. ') || 'Pendiente de análisis.'}</p>
+                <div style={{ fontSize:'.68rem', textTransform:'uppercase', letterSpacing:'.08em', color:'var(--text3)', margin:'.8rem 0 .4rem' }}>Aviso</div>
+                <p style={{ color:'var(--amber)', fontSize:'.75rem' }}>Análisis preliminar IA — requiere validación por especialista.</p>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* HOW IT WORKS */}
-      <div id="como-funciona" style={{ background:'#04232E', padding:'5rem 4%' }}>
-        <div style={{ maxWidth:1200, margin:'0 auto' }}>
-          <div style={{ fontSize:'.75rem', fontWeight:500, letterSpacing:'.1em', textTransform:'uppercase', color:'#5DCAA5', marginBottom:'1rem' }}>Proceso</div>
-          <h2 className="fraunces" style={{ fontSize:'clamp(2rem,3.5vw,2.8rem)', fontWeight:600, letterSpacing:'-.03em', color:'#fff', marginBottom:'1.25rem' }}>
-            Tres pasos. <em style={{ fontStyle:'italic', color:'#5DCAA5' }}>Sin fricción.</em>
-          </h2>
-          <div className="steps-grid" style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'1.5rem', marginTop:'3rem' }}>
-            {[
-              ['01','Subís la imagen','Cargás el archivo DICOM, JPEG o PNG. Compatible con RX, TAC, ecografías y mamografías. Sin instalación de software.'],
-              ['02','La IA analiza al instante','Nuestro modelo identifica hallazgos, los marca en la imagen y genera un pre-informe en menos de 3 minutos.'],
-              ['03','El especialista valida','Un radiólogo de nuestra red revisa, corrige si es necesario y emite el informe firmado digitalmente.'],
-            ].map(([n,t,d])=>(
-              <div key={n} style={{ background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.08)', borderRadius:16, padding:'2rem' }}>
-                <div className="fraunces" style={{ fontSize:'3rem', fontWeight:300, color:'rgba(93,202,165,.25)', lineHeight:1, marginBottom:'1.2rem' }}>{n}</div>
-                <h3 style={{ fontSize:'1rem', fontWeight:500, color:'#fff', marginBottom:'.6rem' }}>{t}</h3>
-                <p style={{ fontSize:'.88rem', color:'rgba(255,255,255,.45)', lineHeight:1.65 }}>{d}</p>
+      {modal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(6,15,20,.85)', zIndex:200, display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(4px)' }}>
+          <div style={{ background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:16, width:480, maxWidth:'95vw', padding:'2rem' }}>
+            <div style={{ fontFamily:"'Fraunces',serif", fontSize:'1.2rem', fontWeight:500, marginBottom:'1.5rem', color:'var(--text)' }}>Nuevo estudio</div>
+            {[['Nombre del paciente','text','name','García, María Laura'],['Edad','number','age','52']].map(([label,type,key,ph])=>(
+              <div key={key} style={{ marginBottom:'1rem' }}>
+                <label style={{ fontSize:'.75rem', color:'var(--text3)', textTransform:'uppercase', letterSpacing:'.07em', marginBottom:'.4rem', display:'block' }}>{label}</label>
+                <input type={type} placeholder={ph} value={form[key as keyof typeof form]}
+                  onChange={e => setForm(f => ({ ...f, [key]:e.target.value }))}
+                  style={{ width:'100%', background:'var(--bg3)', border:'1px solid var(--border)', borderRadius:7, padding:'.6rem .85rem', fontSize:'.85rem', fontFamily:'inherit', color:'var(--text)', outline:'none' }}/>
               </div>
             ))}
+            <div style={{ marginBottom:'1rem' }}>
+              <label style={{ fontSize:'.75rem', color:'var(--text3)', textTransform:'uppercase', letterSpacing:'.07em', marginBottom:'.4rem', display:'block' }}>Tipo de estudio</label>
+              <select value={form.type} onChange={e => setForm(f=>({...f,type:e.target.value}))}
+                style={{ width:'100%', background:'var(--bg3)', border:'1px solid var(--border)', borderRadius:7, padding:'.6rem .85rem', fontSize:'.85rem', fontFamily:'inherit', color:'var(--text)', outline:'none' }}>
+                {['RX Tórax','TAC Abdomen','Ecografía Abdominal','Mamografía','RMN Columna','RX Mano','RX Pie','RX Columna'].map(t=><option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <div style={{ display:'flex', gap:'.75rem', justifyContent:'flex-end', marginTop:'1.5rem' }}>
+              <button style={S.btn('ghost')} onClick={() => setModal(false)}>Cancelar</button>
+              <button style={S.btn('teal')} onClick={createStudy}>Crear estudio</button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* PRICING */}
-      <div id="precios" style={{ background:'#EDE9DF', padding:'5rem 4%' }}>
-        <div style={{ maxWidth:1200, margin:'0 auto' }}>
-          <div style={{ fontSize:'.75rem', fontWeight:500, letterSpacing:'.1em', textTransform:'uppercase', color:'#0F6E56', marginBottom:'1rem' }}>Precios</div>
-          <h2 className="fraunces" style={{ fontSize:'clamp(2rem,3.5vw,2.8rem)', fontWeight:600, letterSpacing:'-.03em', marginBottom:'1.25rem' }}>
-            Transparente. <em style={{ fontStyle:'italic', color:'#0F6E56' }}>Sin sorpresas.</em>
-          </h2>
-          <div className="pricing-grid" style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'1.5rem', marginTop:'3rem', alignItems:'center' }}>
-            {[
-              { name:'Starter', price:'$199', period:'por mes · 50 estudios', features:['Análisis IA para RX y ecografías','Red de especialistas incluida','Informes en 24 horas','Soporte por email','1 usuario'], featured:false },
-              { name:'Clínica', price:'$499', period:'por mes · 200 estudios', features:['Todo el plan Starter','TAC y resonancias incluidas','Informes en 8 horas','Soporte prioritario','5 usuarios + API'], featured:true },
-              { name:'Enterprise', price:'Custom', period:'estudios ilimitados', features:['Todo el plan Clínica','Integración HIS/RIS a medida','SLA garantizado','Gerente de cuenta','Usuarios ilimitados'], featured:false },
-            ].map(p=>(
-              <div key={p.name} className={`pricing-card${p.featured?' featured':''}`}>
-                <div style={{ fontSize:'.75rem', fontWeight:500, textTransform:'uppercase', letterSpacing:'.1em', color: p.featured?'rgba(255,255,255,.6)':'#555', marginBottom:'1rem' }}>{p.name}</div>
-                <div className="fraunces" style={{ fontSize:'2.8rem', fontWeight:600, color:p.featured?'#fff':'#1a1a1a', lineHeight:1, marginBottom:'.3rem' }}>{p.price}</div>
-                <div style={{ fontSize:'.8rem', color:p.featured?'rgba(255,255,255,.5)':'#555', marginBottom:'1.5rem' }}>{p.period}</div>
-                <ul style={{ listStyle:'none', flex:1, marginBottom:'1.5rem' }}>
-                  {p.features.map(f=>(
-                    <li key={f} style={{ fontSize:'.88rem', color:p.featured?'rgba(255,255,255,.7)':'#555', padding:'.5rem 0', borderBottom:`1px solid ${p.featured?'rgba(255,255,255,.12)':'#EDE9DF'}`, display:'flex', alignItems:'center', gap:'.6rem' }}>
-                      <span style={{ color:p.featured?'#5DCAA5':'#1D9E75' }}>✓</span>{f}
-                    </li>
-                  ))}
-                </ul>
-                <Link href="/dashboard" className={`plan-btn${p.featured?' featured-btn':''}`} style={{ textDecoration:'none' }}>
-                  {p.name === 'Enterprise' ? 'Hablar con ventas' : 'Empezar gratis'}
-                </Link>
-              </div>
-            ))}
-          </div>
+      {notification && (
+        <div style={{ position:'fixed', bottom:'1.5rem', right:'1.5rem', background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:10, padding:'.9rem 1.2rem', display:'flex', alignItems:'center', gap:'.7rem', fontSize:'.82rem', color:'var(--text)', zIndex:300, boxShadow:'0 8px 32px rgba(0,0,0,.3)' }}>
+          <span style={{ fontSize:'1rem' }}>{notification.icon}</span>
+          <span>{notification.text}</span>
         </div>
-      </div>
-
-      {/* CTA */}
-      <div style={{ background:'#04232E', padding:'6rem 4%', textAlign:'center' }}>
-        <div style={{ maxWidth:700, margin:'0 auto' }}>
-          <div style={{ fontSize:'.75rem', fontWeight:500, letterSpacing:'.1em', textTransform:'uppercase', color:'#5DCAA5', marginBottom:'1rem' }}>Empezá hoy</div>
-          <h2 className="fraunces" style={{ fontSize:'clamp(2rem,3.5vw,2.8rem)', fontWeight:600, color:'#fff', marginBottom:'1rem', letterSpacing:'-.03em' }}>
-            Tu clínica merece diagnósticos <em style={{ fontStyle:'italic', color:'#5DCAA5' }}>de primer nivel</em>
-          </h2>
-          <p style={{ fontSize:'1.05rem', color:'rgba(255,255,255,.5)', marginBottom:'2.5rem' }}>
-            30 días gratis. Sin tarjeta de crédito. Configuración en menos de 24 horas.
-          </p>
-          <div style={{ display:'flex', gap:'1rem', justifyContent:'center', flexWrap:'wrap' }}>
-            <Link href="/dashboard" style={{ background:'#fff', color:'#0F6E56', padding:'.85rem 2rem', borderRadius:'100px', fontSize:'.95rem', fontWeight:500, textDecoration:'none' }}>
-              Ver demo del dashboard →
-            </Link>
-          </div>
-        </div>
-      </div>
-
-      {/* FOOTER */}
-      <footer style={{ background:'#020f14', padding:'2.5rem 4%', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'1rem' }}>
-        <div className="fraunces" style={{ fontSize:'1.1rem', color:'rgba(255,255,255,.5)' }}>
-          Medi<span style={{ color:'#5DCAA5' }}>Scan</span> IA
-        </div>
-        <p style={{ fontSize:'.8rem', color:'rgba(255,255,255,.25)' }}>© 2025 MediScan IA · Hecho en Argentina 🇦🇷</p>
-        <div style={{ display:'flex', gap:'1.5rem' }}>
-          {['Privacidad','Términos','Contacto'].map(l=>(
-            <a key={l} href="#" style={{ fontSize:'.8rem', color:'rgba(255,255,255,.3)', textDecoration:'none' }}>{l}</a>
-          ))}
-        </div>
-      </footer>
+      )}
     </div>
   )
 }
