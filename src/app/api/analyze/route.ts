@@ -13,30 +13,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         findings: [
           'Modo demo — configurá GEMINI_API_KEY en Vercel',
-          'Silueta cardíaca dentro de límites normales',
-          'Trama vascular pulmonar conservada bilateralmente',
           'Análisis preliminar IA — requiere validación por especialista',
         ]
       })
     }
 
-    const studyContext = studyType ? `El usuario indica que es: ${studyType}.` : ''
+    const prompt = `Sos un médico radiólogo experto. Analizá esta imagen médica con precisión clínica.
 
-    const prompt = `Sos un asistente especializado en diagnóstico por imágenes médicas.
+PASO 1 — Identificá el tipo de imagen:
+Mirá la imagen y determiná si es: radiografía (RX), tomografía (TAC/TC), resonancia magnética (RMN/RM), ecografía/ultrasonido, mamografía, u otro tipo de imagen médica.
+${studyType ? `El operador indica que es: ${studyType}.` : ''}
 
-INSTRUCCIONES:
-1. Mirá la imagen y determiná QUÉ tipo de imagen es realmente (no asumas nada).
-2. Si NO es una imagen médica, devolvé: {"findings":["La imagen no corresponde a un estudio médico válido. Por favor subí una radiografía, ecografía, TAC o similar."],"imageType":"no_medical"}
-3. Si SÍ es médica, describí los hallazgos objetivamente en español. ${studyContext}
+PASO 2 — Si NO es una imagen médica:
+Devolvé exactamente: {"findings":["Imagen no válida: no corresponde a un estudio médico. Por favor subí una radiografía, TAC, ecografía o similar."],"imageType":"no_medical"}
 
-FORMATO DE RESPUESTA — solo JSON, sin texto extra, sin backticks:
-{"findings":["hallazgo 1","hallazgo 2","hallazgo 3","Análisis preliminar IA — requiere validación por especialista"],"imageType":"tipo de imagen detectada"}
+PASO 3 — Si SÍ es una imagen médica, analizá y describí:
+- Qué estructuras anatómicas se ven
+- Si hay alteraciones, opacidades, lesiones, asimetrías o hallazgos relevantes
+- El estado de las estructuras normales visibles
+- Calidad técnica de la imagen si es relevante
 
-REGLAS:
-- Describí exactamente lo que VES, no lo que suponés
-- Máximo 4 hallazgos, máximo 15 palabras cada uno
-- Nunca diagnósticos definitivos, solo hallazgos descriptivos
-- Si la calidad es mala, indicalo como hallazgo`
+FORMATO DE RESPUESTA OBLIGATORIO — devolvé SOLO este JSON, sin texto antes ni después, sin markdown, sin triple backticks:
+{"findings":["hallazgo específico 1","hallazgo específico 2","hallazgo específico 3","Análisis preliminar IA — requiere validación por especialista médico"],"imageType":"tipo detectado"}
+
+REGLAS ESTRICTAS:
+- Cada hallazgo: máximo 12 palabras, lenguaje médico claro
+- Describí lo que VES concretamente en ESTA imagen específica
+- NO repitas frases genéricas que sirvan para cualquier imagen
+- NO inventes estructuras que no puedas ver
+- Máximo 4 hallazgos en total
+- El último hallazgo SIEMPRE debe ser el aviso legal`
 
     const geminiBody = {
       contents: [
@@ -47,10 +53,12 @@ REGLAS:
           ],
         },
       ],
-      generationConfig: { temperature: 0.1, maxOutputTokens: 400 },
+      generationConfig: {
+        temperature: 0.05,
+        maxOutputTokens: 500,
+      },
     }
 
-    // ✅ CORREGIDO: gemini-2.0-flash en lugar de gemini-1.5-flash
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
@@ -62,7 +70,7 @@ REGLAS:
 
     if (!res.ok) {
       const err = await res.text()
-      console.error('Gemini error:', err)
+      console.error('Gemini error response:', err)
       throw new Error(`Gemini API error: ${res.status}`)
     }
 
@@ -71,16 +79,21 @@ REGLAS:
 
     const jsonMatch = text.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0])
-      if (parsed.findings && Array.isArray(parsed.findings)) {
-        return NextResponse.json(parsed)
+      try {
+        const parsed = JSON.parse(jsonMatch[0])
+        if (parsed.findings && Array.isArray(parsed.findings)) {
+          return NextResponse.json(parsed)
+        }
+      } catch {
+        console.error('JSON parse error:', jsonMatch[0])
       }
     }
 
     return NextResponse.json({
       findings: [
-        'Imagen analizada correctamente',
-        'Análisis preliminar IA — requiere validación por especialista',
+        'Imagen recibida y procesada',
+        'No se pudo estructurar el análisis automáticamente',
+        'Análisis preliminar IA — requiere validación por especialista médico',
       ]
     })
 
@@ -89,7 +102,7 @@ REGLAS:
     return NextResponse.json({
       findings: [
         'Error en el análisis — intentá de nuevo',
-        'Análisis preliminar IA — requiere validación por especialista',
+        'Análisis preliminar IA — requiere validación por especialista médico',
       ]
     }, { status: 500 })
   }
